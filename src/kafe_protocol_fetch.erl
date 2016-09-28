@@ -136,8 +136,6 @@ partitions(_, _, _) ->
 message(Data) ->
   message(Data, []).
 
-message(<<>>, Acc) ->
-  lists:reverse(Acc);
 message(<<Offset:64/signed,
           MessageSize:32/signed,
           Message:MessageSize/binary,
@@ -171,7 +169,7 @@ message(<<Offset:64/signed,
                             value => Value}|Acc])
   end;
 message(_, Acc) ->
-  Acc.
+  lists:reverse(Acc).
 
 get_kv(<<KVSize:32/signed, Remainder/binary>>) when KVSize =:= -1 ->
   {<<>>, Remainder};
