@@ -14,7 +14,7 @@ __Authors:__ Gregoire Lejeune ([`gregoire.lejeune@finexkap.com`](mailto:gregoire
 
 __Kafe__ has been tested with Kafka 0.9 and 0.10
 
-You can also use it with Kafka 0.8 but [`kafe_consumer`](https://github.com/botsunit/kafe/blob/refactor_commit/doc/kafe_consumer.md) is not compatible with this version.
+You can also use it with Kafka 0.8 but [`kafe_consumer`](https://github.com/botsunit/kafe/blob/2.0.0/doc/kafe_consumer.md) is not compatible with this version.
 
 
 ### Links ###
@@ -101,10 +101,10 @@ kafe:start_consumer(my_group, fun my_consumer:consume/6, Options),
 
 ```
 
-See [`kafe:start_consumer/3`](https://github.com/botsunit/kafe/blob/refactor_commit/doc/kafe.md#start_consumer-3) for the available `Options`.
+See [`kafe:start_consumer/3`](https://github.com/botsunit/kafe/blob/2.0.0/doc/kafe.md#start_consumer-3) for the available `Options`.
 
 In the `consume` function, if you didn't start the consumer with `autocommit` set to `true`, you need to commit manually when you
-have finished to treat the message. To do so, use [`kafe_consumer:commit/1`](https://github.com/botsunit/kafe/blob/refactor_commit/doc/kafe_consumer.md#commit-1) with the `CommitID` as parameter.
+have finished to treat the message. To do so, use [`kafe_consumer:commit/1`](https://github.com/botsunit/kafe/blob/2.0.0/doc/kafe_consumer.md#commit-1) with the `CommitID` as parameter.
 
 When you are done with your consumer, stop it :
 
@@ -163,7 +163,7 @@ __Kafe__ use [rebar3](http://www.rebar3.org). So, you can use :
 
 ### API Documentation ###
 
-See [documentation](https://github.com/botsunit/kafe/blob/refactor_commit/doc/.)
+See [documentation](https://github.com/botsunit/kafe/blob/2.0.0/doc/.)
 
 
 ### Contributing ###
@@ -196,6 +196,6 @@ THIS SOFTWARE IS PROVIDED BY THE AUTHOR `AS IS` AND ANY EXPRESS OR IMPLIED WARRA
 
 
 <table width="100%" border="0" summary="list of modules">
-<tr><td><a href="https://github.com/botsunit/kafe/blob/refactor_commit/doc/kafe.md" class="module">kafe</a></td></tr>
-<tr><td><a href="https://github.com/botsunit/kafe/blob/refactor_commit/doc/kafe_consumer.md" class="module">kafe_consumer</a></td></tr></table>
+<tr><td><a href="https://github.com/botsunit/kafe/blob/2.0.0/doc/kafe.md" class="module">kafe</a></td></tr>
+<tr><td><a href="https://github.com/botsunit/kafe/blob/2.0.0/doc/kafe_consumer.md" class="module">kafe_consumer</a></td></tr></table>
 
