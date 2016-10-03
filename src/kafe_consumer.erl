@@ -121,7 +121,11 @@ describe(GroupID) ->
 topics(GroupID) ->
   case kafe_consumer_store:lookup(GroupID, topics) of
     {ok, Topics} ->
-      Topics;
+      lists:foldl(fun({Topic, Partitions}, Acc) ->
+                      Acc ++ lists:zip(
+                               lists:duplicate(length(Partitions), Topic),
+                               Partitions)
+                  end, [], Topics);
     _ ->
       []
   end.
