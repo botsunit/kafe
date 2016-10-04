@@ -145,6 +145,45 @@ Kafe.stop_consumer(:my_group)
 ```
 
 
+### Metrics ###
+
+You can enable metrics by adding a metrics module in your configuration :
+
+```
+
+{metrics, [
+  {metrics_mod, metrics_folsom}
+]}
+
+```
+
+You can choose between [Folsom](https://github.com/folsom-project/folsom) (`{metrics_mod, metrics_folsom}`), [Exometer](https://github.com/Feuerlabs/exometer) (`{metrics_mod, metrics_exometer}`) or [Grapherl](https://github.com/processone/grapherl) (`{metrics_mod, metrics_grapherl}`).
+
+Be sure that's Folsom, Exometer or Grapherl is started before starting Kafe.
+
+```
+
+application:ensure_all_started(folsom).
+application:ensure_all_started(kafe).
+
+```
+
+Metrics are disabled by default.
+
+Kafe offers the following metrics :
+
+
+<table>
+<tr><th>Name</th><th>Type</th><th>Description</th></tr>
+<tr><td>kafe_consumer.CONSUMER_GROUP.messages.fetch</td><td>gauge</td><td>Number of received messages on the last fetch</td></tr>
+<tr><td>kafe_consumer.CONSUMER_GROUP.TOPIC.PARTITION.messages.fetch</td><td>gauge</td><td>Number of received messages on the last fetch for the {TOPIC, PARTITION}</td></tr>
+<tr><td>kafe_consumer.CONSUMER_GROUP.messages</td><td>counter</td><td>Total number of received messages</td></tr>
+<tr><td>kafe_consumer.CONSUMER_GROUP.TOPIC.PARTITION.messages</td><td>counter</td><td>Total number of received messages for the {TOPIC, PARTITION}</td></tr>
+<tr><td>kafe_consumer.CONSUMER_GROUP.TOPIC.PARTITION.duration.fetch</td><td>gauge</td><td>Fetch duration (ms) for the {TOPIC, PARTITION}</td></tr>
+</table>
+
+
+
 ### Build ###
 
 __Kafe__ use [rebar3](http://www.rebar3.org). So, you can use :

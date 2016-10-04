@@ -15,6 +15,7 @@ start_link() ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 start_child(GroupID, Options) ->
+  kafe_metrics:init_consumer(GroupID),
   case kafe_consumer_store:lookup(GroupID, sup_pid) of
     {ok, PID} ->
       {ok, PID};
@@ -28,6 +29,7 @@ start_child(GroupID, Options) ->
 stop_child(GroupPID) when is_pid(GroupPID) ->
   supervisor:terminate_child(?MODULE, GroupPID);
 stop_child(GroupID) ->
+  kafe_metrics:delete_consumer(GroupID),
   case kafe_consumer_store:lookup(GroupID, sup_pid) of
     {ok, PID} ->
       stop_child(PID);

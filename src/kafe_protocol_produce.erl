@@ -53,48 +53,63 @@ run(Topic, Message, Options) ->
 %%   Timestamp => int64
 %%   Key => bytes
 %%   Value => bytes
-request(Topic, Partition, Message, Options, #{api_version := ApiVersion} = State) ->
+request(Topic, Partition, Messages, Options, #{api_version := ApiVersion} = State) ->
   Timeout = maps:get(timeout, Options, ?DEFAULT_PRODUCE_SYNC_TIMEOUT),
   RequiredAcks = maps:get(required_acks,
                           Options,
                           ?DEFAULT_PRODUCE_REQUIRED_ACKS),
 
-  {Key, Value} = if
-    is_tuple(Message) -> Message;
-    true -> {<<>>, Message}
-  end,
-  Msg = if
-          ApiVersion >= ?V2 ->
-            Timestamp = maps:get(timestamp, Options, get_timestamp()),
-            <<
-              1:8/signed,
-              0:8/signed,
-              Timestamp:64/signed,
-              (kafe_protocol:encode_bytes(bucs:to_binary(Key)))/binary,
-              (kafe_protocol:encode_bytes(bucs:to_binary(Value)))/binary
-            >>;
-          true ->
-            <<
-              0:8/signed,
-              0:8/signed,
-              (kafe_protocol:encode_bytes(bucs:to_binary(Key)))/binary,
-              (kafe_protocol:encode_bytes(bucs:to_binary(Value)))/binary
-            >>
-        end,
-  SignedMsg = <<(erlang:crc32(Msg)):32/signed, Msg/binary>>,
-  MessageSet = <<0:64/signed, (kafe_protocol:encode_bytes(SignedMsg))/binary>>,
+  Messages1 = [case Msg of
+                 {Key, Value} ->
+                   {Key, Value};
+                 _ ->
+                   {<<>>, Msg}
+               end || Msg <- case is_list(Messages) of
+                               true -> Messages;
+                               false -> [Messages]
+                             end],
+  % MessageSet = message_set(Key, Value, Options, ApiVersion, <<>>),
+  MessageSet = message_set(Messages1, Options, ApiVersion, <<>>),
   Encoded = <<
-              1:32/signed,
-              (kafe_protocol:encode_string(Topic))/binary,
-              1:32/signed,
-              Partition:32/signed,
-              (kafe_protocol:encode_bytes(MessageSet))/binary
+              1:32/signed, % Number of topics
+              (kafe_protocol:encode_string(Topic))/binary, % Topic
+              1:32/signed, % Number or partition
+              Partition:32/signed, % Partition
+              % N.B., MessageSets are not preceded by an int32 like other array elements in the protocol.
+              (kafe_protocol:encode_bytes(MessageSet))/binary % Message Set
             >>,
   kafe_protocol:request(
     ?PRODUCE_REQUEST,
     <<RequiredAcks:16, Timeout:32, Encoded/binary>>,
     State,
     ApiVersion).
+
+message_set([], _, _, Result) ->
+  Result;
+message_set([{Key, Value}|Rest], Options, ApiVersion, Acc) ->
+  Msg = if
+          ApiVersion >= ?V2 ->
+            Timestamp = maps:get(timestamp, Options, get_timestamp()),
+            <<
+              1:8/signed, % MagicByte
+              0:8/signed, % Attributes
+              Timestamp:64/signed, % Timestamp
+              (kafe_protocol:encode_bytes(bucs:to_binary(Key)))/binary, % Key
+              (kafe_protocol:encode_bytes(bucs:to_binary(Value)))/binary % Value
+            >>;
+          true ->
+            <<
+              0:8/signed, % MagicByte
+              0:8/signed, % Attributes
+              (kafe_protocol:encode_bytes(bucs:to_binary(Key)))/binary, % Key
+              (kafe_protocol:encode_bytes(bucs:to_binary(Value)))/binary % Value
+            >>
+        end,
+  SignedMsg = <<(erlang:crc32(Msg)):32/signed, Msg/binary>>,
+  message_set(Rest, Options, ApiVersion,
+              <<Acc/binary,
+                0:64/signed, % Offset
+                (kafe_protocol:encode_bytes(SignedMsg))/binary>>). % MessageSize Message
 
 %% Produce Response
 %% v0

@@ -15,7 +15,7 @@ defmodule Kafe.Mixfile do
 
   def application do
     [
-       applications: [:syntax_tools, :compiler, :poolgirl, :goldrush, :lager, :bucs, :doteki],
+       applications: [:syntax_tools, :compiler, :poolgirl, :goldrush, :lager, :bucs, :doteki, :metrics],
        env: [],
        mod: {:kafe_app, []}
     ]
@@ -27,7 +27,9 @@ defmodule Kafe.Mixfile do
       {:bucs, "~> 0.1.9"},
       {:doteki, "~> 0.1.13"},
       {:poolgirl, git: "https://github.com/botsunit/poolgirl.git", branch: "master"},
-      {:bristow, "~> 0.1.1"}    
+      {:bristow, "~> 0.1.1"},
+      {:metrics, "~> 2.1.0"},
+      {:folsom, "~> 0.8.3", only: :dev}    
     ]
   end
 

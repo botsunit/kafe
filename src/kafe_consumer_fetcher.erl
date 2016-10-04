@@ -131,7 +131,9 @@ fetch(#state{fetch_interval = FetchInterval,
                                         [#{error_code := ErrorCode,
                                            messages := Messages,
                                            partition := Partition}]}]}} when ErrorCode == none ->
-                                perform_fetch(Messages, Topic, Partition, Autocommit, Processing, GroupID, Callback, Offset);
+                                kafe_metrics:consumer_messages(GroupID, length(Messages)),
+                                kafe_metrics:consumer_partition_messages(GroupID, Topic, Partition, length(Messages)),
+                                perform_fetch(Messages, Topic, Partition, Autocommit, Processing, GroupID, Callback, Offset, erlang:system_time(milli_seconds));
                               {ok, #{topics :=
                                      [#{name := Topic,
                                         partitions :=
@@ -174,7 +176,9 @@ fetch(#state{fetch_interval = FetchInterval,
   State#state{timer = erlang:send_after(FetchInterval, self(), fetch),
               offset = OffsetFetch}.
 
-perform_fetch([], _, _, _, _, _, _, LastOffset) ->
+perform_fetch([], Topic, Partition, _, _, GroupID, _, LastOffset, Start) ->
+  Duration = erlang:system_time(milli_seconds) - Start,
+  kafe_metrics:consumer_partition_duration(GroupID, Topic, Partition, Duration),
   LastOffset;
 perform_fetch([#{offset := Offset,
                  key := Key,
@@ -182,7 +186,7 @@ perform_fetch([#{offset := Offset,
               Topic, Partition,
               Autocommit, Processing,
               GroupID, Callback,
-              LastOffset) ->
+              LastOffset, Start) ->
   CommitRef = kafe_consumer:store_for_commit(GroupID, Topic, Partition, Offset),
   case commit(CommitRef, Autocommit, Processing, at_most_once) of
     {error, Reason} ->
@@ -205,7 +209,7 @@ perform_fetch([#{offset := Offset,
               lager:error("[~p] Commit error for offset ~p of ~p#~p : ~p", [Processing, Offset, Topic, Partition, Reason]),
               LastOffset;
             _ ->
-              perform_fetch(Messages, Topic, Partition, Autocommit, Processing, GroupID, Callback, Offset)
+              perform_fetch(Messages, Topic, Partition, Autocommit, Processing, GroupID, Callback, Offset, Start)
           end;
         callback_exception ->
           LastOffset;
@@ -261,6 +265,10 @@ fetch_without_error_test() ->
                                                        ],
                                            partition => Partition}]}]}}
                            end),
+  meck:new(kafe_metrics, [passthrough]),
+  meck:expect(kafe_metrics, consumer_messages, 2, ok),
+  meck:expect(kafe_metrics, consumer_partition_messages, 4, ok),
+  meck:expect(kafe_metrics, consumer_partition_duration, 4, ok),
 
   ?assertMatch(#state{fetch_interval = 100,
                       topic = <<"topic">>,
@@ -283,6 +291,7 @@ fetch_without_error_test() ->
                             max_wait_time = 10,
                             callback = fun(_, _, _, _, _, _) -> ok end})),
 
+  meck:unload(kafe_metrics),
   meck:unload(kafe),
   meck:unload(kafe_consumer).
 
@@ -326,6 +335,10 @@ nothing_to_fetch_test() ->
                                                          id => Partition,
                                                          offsets => [100]}]}]}
                             end),
+  meck:new(kafe_metrics, [passthrough]),
+  meck:expect(kafe_metrics, consumer_messages, 2, ok),
+  meck:expect(kafe_metrics, consumer_partition_messages, 4, ok),
+  meck:expect(kafe_metrics, consumer_partition_duration, 4, ok),
 
   ?assertMatch(#state{fetch_interval = 100,
                       topic = <<"topic">>,
@@ -348,6 +361,7 @@ nothing_to_fetch_test() ->
                             max_wait_time = 10,
                             callback = fun(_, _, _, _, _, _) -> ok end})),
 
+  meck:unload(kafe_metrics),
   meck:unload(kafe),
   meck:unload(kafe_consumer).
 
@@ -562,6 +576,8 @@ perform_fetch_without_error_test() ->
   meck:expect(kafe_consumer, store_for_commit, fun(_, _, _, Offset) ->
                                                    Offset
                                                end),
+  meck:new(kafe_metrics, [passthrough]),
+  meck:expect(kafe_metrics, consumer_partition_duration, 4, ok),
   ?assertEqual(100,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>}],
                              <<"topic">>,
@@ -570,7 +586,8 @@ perform_fetch_without_error_test() ->
                              at_most_once,
                              srv,
                              fun(_, _, _, _, _, _) -> ok end,
-                             100)),
+                             100,
+                             0)),
   ?assertEqual(102,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>},
                               #{offset => 101, key => <<"key">>, value => <<"value">>},
@@ -581,7 +598,8 @@ perform_fetch_without_error_test() ->
                              at_most_once,
                              srv,
                              fun(_, _, _, _, _, _) -> ok end,
-                             100)),
+                             100,
+                             0)),
   ?assertEqual(100,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>}],
                              <<"topic">>,
@@ -590,7 +608,8 @@ perform_fetch_without_error_test() ->
                              at_least_once,
                              srv,
                              fun(_, _, _, _, _, _) -> ok end,
-                             100)),
+                             100,
+                             0)),
   ?assertEqual(102,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>},
                               #{offset => 101, key => <<"key">>, value => <<"value">>},
@@ -601,7 +620,9 @@ perform_fetch_without_error_test() ->
                              at_least_once,
                              srv,
                              fun(_, _, _, _, _, _) -> ok end,
-                             100)),
+                             100,
+                             0)),
+  meck:unload(kafe_metrics),
   meck:unload(kafe_consumer).
 
 perform_fetch_with_invalid_processing_commit_test() ->
@@ -610,6 +631,8 @@ perform_fetch_with_invalid_processing_commit_test() ->
   meck:expect(kafe_consumer, store_for_commit, fun(_, _, _, Offset) ->
                                                    Offset
                                                end),
+  meck:new(kafe_metrics, [passthrough]),
+  meck:expect(kafe_metrics, consumer_partition_duration, 4, ok),
   ?assertEqual(100,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>},
                               #{offset => 101, key => <<"key">>, value => <<"value">>}],
@@ -619,7 +642,9 @@ perform_fetch_with_invalid_processing_commit_test() ->
                              invalid_processing,
                              srv,
                              fun(_, _, _, _, _, _) -> ok end,
-                             100)),
+                             100,
+                             0)),
+  meck:unload(kafe_metrics),
   meck:unload(kafe_consumer).
 
 perform_fetch_with_commit_error_test() ->
@@ -628,6 +653,8 @@ perform_fetch_with_commit_error_test() ->
   meck:expect(kafe_consumer, store_for_commit, fun(_, _, _, Offset) ->
                                                    Offset
                                                end),
+  meck:new(kafe_metrics, [passthrough]),
+  meck:expect(kafe_metrics, consumer_partition_duration, 4, ok),
   ?assertEqual(100,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>},
                               #{offset => 101, key => <<"key">>, value => <<"value">>}],
@@ -637,7 +664,8 @@ perform_fetch_with_commit_error_test() ->
                              at_least_once,
                              srv,
                              fun(_, _, _, _, _, _) -> ok end,
-                             100)),
+                             100,
+                             0)),
   ?assertEqual(100,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>},
                               #{offset => 101, key => <<"key">>, value => <<"value">>}],
@@ -647,7 +675,9 @@ perform_fetch_with_commit_error_test() ->
                              at_most_once,
                              srv,
                              fun(_, _, _, _, _, _) -> ok end,
-                             100)),
+                             100,
+                             0)),
+  meck:unload(kafe_metrics),
   meck:unload(kafe_consumer).
 
 perform_fetch_with_callback_exception_test() ->
@@ -656,6 +686,8 @@ perform_fetch_with_callback_exception_test() ->
   meck:expect(kafe_consumer, store_for_commit, fun(_, _, _, Offset) ->
                                                    Offset
                                                end),
+  meck:new(kafe_metrics, [passthrough]),
+  meck:expect(kafe_metrics, consumer_partition_duration, 4, ok),
   ?assertEqual(100,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>},
                               #{offset => 101, key => <<"key">>, value => <<"value">>}],
@@ -665,7 +697,8 @@ perform_fetch_with_callback_exception_test() ->
                              at_least_once,
                              srv,
                              fun(_, _, _, _, _, <<"bad match">>) -> ok end,
-                             100)),
+                             100,
+                             0)),
   ?assertEqual(100,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>},
                               #{offset => 101, key => <<"key">>, value => <<"value">>}],
@@ -675,7 +708,9 @@ perform_fetch_with_callback_exception_test() ->
                              at_most_once,
                              srv,
                              fun(_, _, _, _, _, <<"bat match">>) -> ok end,
-                             100)),
+                             100,
+                             0)),
+  meck:unload(kafe_metrics),
   meck:unload(kafe_consumer).
 
 perform_fetch_with_callback_error_test() ->
@@ -684,6 +719,8 @@ perform_fetch_with_callback_error_test() ->
   meck:expect(kafe_consumer, store_for_commit, fun(_, _, _, Offset) ->
                                                    Offset
                                                end),
+  meck:new(kafe_metrics, [passthrough]),
+  meck:expect(kafe_metrics, consumer_partition_duration, 4, ok),
   ?assertEqual(100,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>},
                               #{offset => 101, key => <<"key">>, value => <<"value">>}],
@@ -693,7 +730,8 @@ perform_fetch_with_callback_error_test() ->
                              at_least_once,
                              srv,
                              fun(_, _, _, _, _, _) -> {error, test_error} end,
-                             100)),
+                             100,
+                             0)),
   ?assertEqual(100,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>},
                               #{offset => 101, key => <<"key">>, value => <<"value">>}],
@@ -703,7 +741,9 @@ perform_fetch_with_callback_error_test() ->
                              at_most_once,
                              srv,
                              fun(_, _, _, _, _, _) -> {error, test_error} end,
-                             100)),
+                             100,
+                             0)),
+  meck:unload(kafe_metrics),
   meck:unload(kafe_consumer).
 
 perform_fetch_with_invalid_callback_response_test() ->
@@ -712,6 +752,8 @@ perform_fetch_with_invalid_callback_response_test() ->
   meck:expect(kafe_consumer, store_for_commit, fun(_, _, _, Offset) ->
                                                    Offset
                                                end),
+  meck:new(kafe_metrics, [passthrough]),
+  meck:expect(kafe_metrics, consumer_partition_duration, 4, ok),
   ?assertEqual(100,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>},
                               #{offset => 101, key => <<"key">>, value => <<"value">>}],
@@ -721,7 +763,8 @@ perform_fetch_with_invalid_callback_response_test() ->
                              at_least_once,
                              srv,
                              fun(_, _, _, _, _, _) -> invalid_test_response end,
-                             100)),
+                             100,
+                             0)),
   ?assertEqual(100,
                perform_fetch([#{offset => 100, key => <<"key">>, value => <<"value">>},
                               #{offset => 101, key => <<"key">>, value => <<"value">>}],
@@ -731,7 +774,9 @@ perform_fetch_with_invalid_callback_response_test() ->
                              at_most_once,
                              srv,
                              fun(_, _, _, _, _, _) -> invalid_test_response end,
-                             100)),
+                             100,
+                             0)),
+  meck:unload(kafe_metrics),
   meck:unload(kafe_consumer).
 
 commit_test() ->

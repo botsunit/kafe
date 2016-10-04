@@ -172,9 +172,10 @@ update_fetchers(Topics, #state{fetchers = Fetchers,
 
 stop_fetchers([], State) ->
   State;
-stop_fetchers([TP|Rest], #state{fetchers = Fetchers, commits = Commits} = State) ->
+stop_fetchers([TP|Rest], #state{fetchers = Fetchers, commits = Commits, group_id = GroupID} = State) ->
   case lists:keyfind(TP, 1, Fetchers) of
-    {TP, Pid, MRef} ->
+    {{Topic, Partition} = TP, Pid, MRef} ->
+      kafe_metrics:delete_consumer_partition(GroupID, Topic, Partition),
       CommitStoreKey = erlang:term_to_binary(TP),
       _ = erlang:demonitor(MRef),
       try
@@ -200,6 +201,7 @@ start_fetchers([{Topic, Partition}|Rest], #state{fetchers = Fetchers,
                                                  max_wait_time = MaxWaitTime,
                                                  callback = Callback,
                                                  processing = Processing} = State) ->
+  kafe_metrics:init_consumer_partition(GroupID, Topic, Partition),
   case kafe_consumer_fetcher_sup:start_child(Topic, Partition, FetchInterval,
                                              GroupID, Autocommit, MinBytes, MaxBytes,
                                              MaxWaitTime, Callback, Processing) of
@@ -277,6 +279,9 @@ update_fetchers_create_test() ->
   meck:new(kafe_consumer_fetcher_sup, [passthrough]),
   meck:expect(kafe_consumer_fetcher_sup, start_child, 10, {ok, c:pid(0, 0, 0)}),
   meck:expect(kafe_consumer_fetcher_sup, stop_child, 1, ok),
+  meck:new(kafe_metrics, [passthrough]),
+  meck:expect(kafe_metrics, delete_consumer_partition, 3, ok),
+  meck:expect(kafe_metrics, init_consumer_partition, 3, ok),
   kafe_consumer_store:new(<<"test_cg">>),
   State = #state{group_id = <<"test_cg">>},
   Topics = [{<<"topic0">>, [0, 1, 2]}, {<<"topic1">>, [0, 1]}],
@@ -296,12 +301,16 @@ update_fetchers_create_test() ->
                 {<<"topic1">>, 1}],
                kafe_consumer:topics(<<"test_cg">>)),
   kafe_consumer_store:delete(<<"test_cg">>),
+  meck:unload(kafe_metrics),
   meck:unload(kafe_consumer_fetcher_sup).
 
 update_fetchers_unchange_test() ->
   meck:new(kafe_consumer_fetcher_sup, [passthrough]),
   meck:expect(kafe_consumer_fetcher_sup, start_child, 10, {ok, c:pid(0, 0, 0)}),
   meck:expect(kafe_consumer_fetcher_sup, stop_child, 1, ok),
+%  meck:new(kafe_metrics, [passthrough]),
+%  meck:expect(kafe_metrics, delete_consumer_partition, 3, ok),
+%  meck:expect(kafe_metrics, init_consumer_partition, 3, ok),
   kafe_consumer_store:new(<<"test_cg">>),
   Topics = [{<<"topic0">>, [0, 1, 2]}, {<<"topic1">>, [0, 1]}],
   kafe_consumer_store:insert(<<"test_cg">>, topics, Topics),
@@ -315,18 +324,21 @@ update_fetchers_unchange_test() ->
                 {<<"topic1">>, 1}],
                kafe_consumer:topics(<<"test_cg">>)),
   kafe_consumer_store:delete(<<"test_cg">>),
+%  meck:unload(kafe_metrics),
   meck:unload(kafe_consumer_fetcher_sup).
 
 update_fetchers_add_test() ->
   meck:new(kafe_consumer_fetcher_sup, [passthrough]),
   meck:expect(kafe_consumer_fetcher_sup, start_child, 10, {ok, c:pid(0, 0, 0)}),
   meck:expect(kafe_consumer_fetcher_sup, stop_child, 1, ok),
+  meck:new(kafe_metrics, [passthrough]),
+%  meck:expect(kafe_metrics, delete_consumer_partition, 3, ok),
+  meck:expect(kafe_metrics, init_consumer_partition, 3, ok),
   kafe_consumer_store:new(<<"test_cg">>),
   Topics = [{<<"topic0">>, [0, 1, 2]}, {<<"topic1">>, [0, 1]}],
   kafe_consumer_store:insert(<<"test_cg">>, topics, Topics),
   State = #state{group_id = <<"test_cg">>, topics = Topics},
   NewTopics = [{<<"topic0">>, [0, 1, 2]}, {<<"topic1">>, [0, 1, 2]}, {<<"topic2">>, [0, 1, 2]}],
-  {reply, ok, R} = handle_call({topics, NewTopics}, from, State),
   ?assertMatch({reply, ok,
                 #state{group_id = <<"test_cg">>,
                        topics = NewTopics,
@@ -351,18 +363,52 @@ update_fetchers_add_test() ->
                 {<<"topic2">>, 2}],
                kafe_consumer:topics(<<"test_cg">>)),
   kafe_consumer_store:delete(<<"test_cg">>),
+  meck:unload(kafe_metrics),
+  meck:unload(kafe_consumer_fetcher_sup).
+
+update_fetchers_delete_test() ->
+  meck:new(kafe_consumer_fetcher_sup, [passthrough]),
+  meck:expect(kafe_consumer_fetcher_sup, start_child, 10, {ok, c:pid(0, 0, 0)}),
+  meck:expect(kafe_consumer_fetcher_sup, stop_child, 1, ok),
+  meck:new(kafe_metrics, [passthrough]),
+  meck:expect(kafe_metrics, delete_consumer_partition, 3, ok),
+  meck:expect(kafe_metrics, init_consumer_partition, 3, ok),
+  kafe_consumer_store:new(<<"test_cg">>),
+  Topics = [{<<"topic0">>, [0, 1, 2]}, {<<"topic1">>, [0, 1, 2]}, {<<"topic2">>, [0, 1, 2]}],
+  kafe_consumer_store:insert(<<"test_cg">>, topics, Topics),
+  State = #state{group_id = <<"test_cg">>, topics = Topics},
+  NewTopics = [{<<"topic0">>, [0, 1, 2]}, {<<"topic1">>, [0, 1]}],
+  ?assertMatch({reply, ok,
+                #state{group_id = <<"test_cg">>,
+                       topics = NewTopics,
+                       fetchers = [{{<<"topic0">>, 2}, _, _},
+                                   {{<<"topic0">>, 1}, _, _},
+                                   {{<<"topic0">>, 0}, _, _},
+                                   {{<<"topic1">>, 1}, _, _},
+                                   {{<<"topic1">>, 0}, _, _}]}},
+               handle_call({topics, NewTopics}, from, State)),
+  ?assertEqual([{<<"topic0">>, 0},
+                {<<"topic0">>, 1},
+                {<<"topic0">>, 2},
+                {<<"topic1">>, 0},
+                {<<"topic1">>, 1}],
+               kafe_consumer:topics(<<"test_cg">>)),
+  kafe_consumer_store:delete(<<"test_cg">>),
+  meck:unload(kafe_metrics),
   meck:unload(kafe_consumer_fetcher_sup).
 
 update_fetchers_update_test() ->
   meck:new(kafe_consumer_fetcher_sup, [passthrough]),
   meck:expect(kafe_consumer_fetcher_sup, start_child, 10, {ok, c:pid(0, 0, 0)}),
   meck:expect(kafe_consumer_fetcher_sup, stop_child, 1, ok),
+  meck:new(kafe_metrics, [passthrough]),
+  meck:expect(kafe_metrics, delete_consumer_partition, 3, ok),
+  meck:expect(kafe_metrics, init_consumer_partition, 3, ok),
   kafe_consumer_store:new(<<"test_cg">>),
   Topics = [{<<"topic0">>, [0, 1, 2]}, {<<"topic1">>, [0, 1]}],
   kafe_consumer_store:insert(<<"test_cg">>, topics, Topics),
   State = #state{group_id = <<"test_cg">>, topics = Topics},
   NewTopics = [{<<"topic1">>, [0, 1, 2]}, {<<"topic2">>, [0, 1, 2]}],
-  {reply, ok, R} = handle_call({topics, NewTopics}, from, State),
   ?assertMatch({reply, ok,
                 #state{group_id = <<"test_cg">>,
                        topics = NewTopics,
@@ -381,6 +427,7 @@ update_fetchers_update_test() ->
                 {<<"topic2">>, 2}],
                kafe_consumer:topics(<<"test_cg">>)),
   kafe_consumer_store:delete(<<"test_cg">>),
+  meck:unload(kafe_metrics),
   meck:unload(kafe_consumer_fetcher_sup).
 -endif.
 

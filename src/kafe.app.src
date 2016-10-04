@@ -12,7 +12,8 @@
                     goldrush,
                     lager,
                     bucs,
-                    doteki
+                    doteki,
+                    metrics
                    ]}
   , {mod, {kafe_app, []}}
   , {env, []}

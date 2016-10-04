@@ -1,6 +1,9 @@
-%{"bristow": {:hex, :bristow, "0.1.1", "1f9c1d6f0368e23e34b67908f5578beb3faed9668de8f86bfe4e4047d1f59a86", [:rebar3, :mix, :make], []},
+%{"bear": {:hex, :bear, "0.8.3", "866002127a97932720a0d475d8582c98ec5fb78db3a18dfe7eaf91594d9024b8", [:rebar3], []},
+  "bristow": {:hex, :bristow, "0.1.1", "1f9c1d6f0368e23e34b67908f5578beb3faed9668de8f86bfe4e4047d1f59a86", [:rebar3, :mix, :make], []},
   "bucs": {:hex, :bucs, "0.1.9", "810fdfeb83adf127e6303fbb1e8139bd575699dee8204f46f162908b5f343cf5", [:rebar3, :mix, :make], []},
   "doteki": {:hex, :doteki, "0.1.13", "c78ba7b2373371d5319896f462d437456e7c9de75ed79aa433bac8532235057f", [:rebar3, :mix, :make], [{:bucs, "~> 0.1.9", [hex: :bucs, optional: false]}]},
+  "folsom": {:hex, :folsom, "0.8.3", "71cff146152fa95e6092e62119f9dc96888660111e7b61853c8fdcf80598a4e0", [:rebar3], [{:bear, "0.8.3", [hex: :bear, optional: false]}]},
   "goldrush": {:hex, :goldrush, "0.1.8", "2024ba375ceea47e27ea70e14d2c483b2d8610101b4e852ef7f89163cdb6e649", [:rebar3], []},
   "lager": {:hex, :lager, "3.2.1", "eef4e18b39e4195d37606d9088ea05bf1b745986cf8ec84f01d332456fe88d17", [:rebar3], [{:goldrush, "0.1.8", [hex: :goldrush, optional: false]}]},
+  "metrics": {:hex, :metrics, "2.1.0", "6cd43bcd7eb0702458184b9dc8e53ba4338696bfbe90698b45010a870dc227da", [:rebar3], []},
   "poolgirl": {:git, "https://github.com/botsunit/poolgirl.git", "0fa24c3363ead552c92c8c699811fcca73736364", [branch: "master"]}}
