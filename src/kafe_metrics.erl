@@ -25,7 +25,12 @@ consumer_messages(Consumer, NbMessages) ->
   metrics:update(consumer_metric(Consumer, <<"messages">>), {c, NbMessages}).
 
 consumer_metric(Consumer, Ext) ->
-  bucs:to_string(<<"kafe_consumer.",
+  Prefix = case doteki:get_as_binary([metrics, metrics_prefix], <<>>) of
+    <<>> -> <<>>;
+    Other -> <<Other/binary, ".">>
+  end,
+  bucs:to_string(<<Prefix/binary,
+                   "kafe_consumer.",
                    (bucs:to_binary(Consumer))/binary,
                    ".", Ext/binary>>).
 
@@ -50,7 +55,12 @@ consumer_partition_duration(Consumer, Topic, Partition, Duration) ->
                  Duration).
 
 consumer_partition_metric(Consumer, Topic, Partition, Ext) ->
-  bucs:to_string(<<"kafe_consumer.",
+  Prefix = case doteki:get_as_binary([metrics, metrics_prefix], <<>>) of
+    <<>> -> <<>>;
+    Other -> <<Other/binary, ".">>
+  end,
+  bucs:to_string(<<Prefix/binary,
+                   "kafe_consumer.",
                    (bucs:to_binary(Consumer))/binary,
                    ".", (bucs:to_binary(Topic))/binary,
                    ".", (bucs:to_binary(Partition))/binary,

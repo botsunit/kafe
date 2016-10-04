@@ -177,8 +177,7 @@ fetch(#state{fetch_interval = FetchInterval,
               offset = OffsetFetch}.
 
 perform_fetch([], Topic, Partition, _, _, GroupID, _, LastOffset, Start) ->
-  Duration = erlang:system_time(milli_seconds) - Start,
-  kafe_metrics:consumer_partition_duration(GroupID, Topic, Partition, Duration),
+  kafe_metrics:consumer_partition_duration(GroupID, Topic, Partition, erlang:system_time(milli_seconds) - Start),
   LastOffset;
 perform_fetch([#{offset := Offset,
                  key := Key,
@@ -209,7 +208,9 @@ perform_fetch([#{offset := Offset,
               lager:error("[~p] Commit error for offset ~p of ~p#~p : ~p", [Processing, Offset, Topic, Partition, Reason]),
               LastOffset;
             _ ->
-              perform_fetch(Messages, Topic, Partition, Autocommit, Processing, GroupID, Callback, Offset, Start)
+              Next = erlang:system_time(milli_seconds),
+              kafe_metrics:consumer_partition_duration(GroupID, Topic, Partition, Next - Start),
+              perform_fetch(Messages, Topic, Partition, Autocommit, Processing, GroupID, Callback, Offset, Next)
           end;
         callback_exception ->
           LastOffset;
