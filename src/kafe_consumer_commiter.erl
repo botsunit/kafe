@@ -57,11 +57,11 @@ handle_call({store_for_commit, Offset}, _From, #state{commits = Commits,
                                                       topic = Topic,
                                                       partition = Partition,
                                                       group_id = GroupID} = State) ->
+  lager:debug("Store for commit offset ~p for Topic ~p, partition ~p", [Offset, Topic, Partition]),
   GenerationID = kafe_consumer_store:value(GroupID, generation_id),
   MemberID = kafe_consumer_store:value(GroupID, member_id),
   CommitsList = lists:append(Commits,
                              [{{Topic, Partition, Offset, GroupID, GenerationID, MemberID}, false}]),
-  lager:debug("STORE FOR COMMIT Offset ~p for Topic ~p, partition ~p", [Offset, Topic, Partition]),
   {reply,
    kafe_consumer:encode_group_commit_identifier(self(), Topic, Partition, Offset, GroupID, GenerationID, MemberID),
    State#state{commits = CommitsList}};
@@ -105,18 +105,25 @@ unordered_commit(Topic, Partition, Offset, GroupID, GenerationID, MemberID, Opti
   Delay = maps:get(delay, Options, ?DEFAULT_CONSUMER_COMMIT_DELAY),
   case lists:keyfind({Topic, Partition, Offset, GroupID, GenerationID, MemberID}, 1, Commits) of
     {{Topic, Partition, Offset, GroupID, GenerationID, MemberID} = Commit, _} ->
-      case commit(
-             lists:keyreplace(Commit, 1, Commits, {Commit, true}),
-             ok, Retry, Delay) of
-        {ok, Commits1} ->
-          case lists:keyfind({Topic, Partition, Offset, GroupID, GenerationID, MemberID}, 1, Commits1) of
-            {{Topic, Partition, Offset, GroupID, GenerationID, MemberID}, true} ->
-              {reply, delayed, State#state{commits = Commits1}};
-            false ->
-              {reply, ok, State#state{commits = Commits1}}
-          end;
-        {Error, Commits1} ->
-          {reply, Error, State#state{commits = Commits1}}
+      UpdatedCommits = lists:keyreplace(Commit, 1, Commits, {Commit, true}),
+      case find_last_commit(UpdatedCommits, undefined) of
+        {UpdatedCommits, undefined} ->
+          {reply, delayed, State#state{commits = UpdatedCommits}};
+        {Commits0, {{Topic, Partition, OffsetC, GroupID, GenerationIDC, MemberIDC}, true}} ->
+          case do_commit(GroupID, GenerationIDC, MemberIDC,
+                         Topic, Partition, OffsetC,
+                         Retry, Delay, {error, invalid_retry}) of
+            {ok, [#{name := Topic,
+                    partitions := [#{error_code := none,
+                                     partition := Partition}]}]} ->
+              {reply, ok, State#state{commits = Commits0}};
+            {ok, [#{name := Topic,
+                    partitions := [#{error_code := Error,
+                                     partition := Partition}]}]} ->
+              {reply, {error, Error}, State#state{commits = UpdatedCommits}};
+            Error ->
+              {reply, Error, State#state{commits = UpdatedCommits}}
+          end
       end;
     false ->
       {reply, {error, invalid_commit_ref}, State}
@@ -146,30 +153,18 @@ ordered_commit(Topic, Partition, Offset, GroupID, GenerationID, MemberID, Option
       {reply, {error, missing_previous_commit}, State}
   end.
 
-commit([], Result, _, _) ->
-  {Result, []};
-commit([{_, false}|_] = Rest, Result, _, _) ->
-  {Result, Rest};
-commit([{{Topic, Partition, Offset, GroupID, GenerationID, MemberID}, true}|Rest] = All, ok, Retry, Delay) ->
-  lager:debug("COMMIT Offset ~p for Topic ~p, partition ~p", [Offset, Topic, Partition]),
-  case do_commit(GroupID, GenerationID, MemberID,
-                 Topic, Partition, Offset,
-                 Retry, Delay, {error, invalid_retry}) of
-    {ok, [#{name := Topic,
-            partitions := [#{error_code := none,
-                             partition := Partition}]}]} ->
-      commit(Rest, ok, Retry, Delay);
-    {ok, [#{name := Topic,
-            partitions := [#{error_code := Error,
-                             partition := Partition}]}]} ->
-      {{error, Error}, All};
-    Error ->
-      {Error, All}
-  end.
+find_last_commit([], Resultat) ->
+  {[], Resultat};
+find_last_commit([{_, false}|_] = Rest, Resultat) ->
+  {Rest, Resultat};
+find_last_commit([{_, true} = Commit|Rest], _) ->
+  find_last_commit(Rest, Commit).
+
 
 do_commit(_, _, _, _, _, _, Retry, _, Return) when Retry < 0 ->
   Return;
 do_commit(GroupID, GenerationID, MemberID, Topic, Partition, Offset, Retry, Delay, _) ->
+  lager:debug("Commit Offset ~p for Topic ~p, partition ~p", [Offset, Topic, Partition]),
   case kafe:offset_commit(GroupID, GenerationID, MemberID, -1,
                           [{Topic, [{Partition, Offset, <<>>}]}]) of
     {ok, [#{name := Topic,
@@ -377,5 +372,369 @@ invalid_commit_test() ->
   meck:unload(kafe_consumer_store),
   meck:unload(kafe).
 
+unordered_commit_test() ->
+  meck:new(kafe, [passthrough]),
+  meck:expect(kafe, offset_commit, fun(GroupID, GenerationID, MemberID, _,
+                                       [{Topic, [{Partition, Offset, <<>>}]}]) ->
+                                       ?assertEqual(<<"group_id">>, GroupID),
+                                       ?assertEqual(0, GenerationID),
+                                       ?assertEqual(<<"member_id">>, MemberID),
+                                       ?assertEqual(<<"topic">>, Topic),
+                                       ?assertEqual(0, Partition),
+                                       ?assertEqual(103, Offset),
+                                       {ok,
+                                        [#{name => Topic,
+                                           partitions =>
+                                           [#{error_code => none,
+                                              partition => Partition}]}]}
+                                   end),
+  State = #state{commits =
+                 [
+                  {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, true},
+                  {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                  {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                 ]},
+  ?assertMatch({reply, ok, #state{commits = []}},
+               unordered_commit(<<"topic">>,
+                                0,
+                                100,
+                                <<"group_id">>,
+                                0,
+                                <<"member_id">>,
+                                #{},
+                                State)),
+  meck:unload(kafe).
+
+unordered_commit_kafka_failed_test() ->
+  meck:new(kafe, [passthrough]),
+  meck:expect(kafe, offset_commit, fun(GroupID, GenerationID, MemberID, _,
+                                       [{Topic, [{Partition, Offset, <<>>}]}]) ->
+                                       ?assertEqual(<<"group_id">>, GroupID),
+                                       ?assertEqual(0, GenerationID),
+                                       ?assertEqual(<<"member_id">>, MemberID),
+                                       ?assertEqual(<<"topic">>, Topic),
+                                       ?assertEqual(0, Partition),
+                                       ?assertEqual(103, Offset),
+                                       {ok,
+                                        [#{name => Topic,
+                                           partitions =>
+                                           [#{error_code => test_error,
+                                              partition => Partition}]}]}
+                                   end),
+  State = #state{commits =
+                 [
+                  {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, true},
+                  {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                  {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                 ]},
+  ?assertMatch({reply, {error, test_error},
+                #state{commits =
+                       [
+                        {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                       ]}},
+               unordered_commit(<<"topic">>,
+                                0,
+                                100,
+                                <<"group_id">>,
+                                0,
+                                <<"member_id">>,
+                                #{},
+                                State)),
+  meck:unload(kafe).
+
+unordered_commit_kafe_offset_commit_failed_test() ->
+  meck:new(kafe, [passthrough]),
+  meck:expect(kafe, offset_commit, fun(GroupID, GenerationID, MemberID, _,
+                                       [{Topic, [{Partition, Offset, <<>>}]}]) ->
+                                       ?assertEqual(<<"group_id">>, GroupID),
+                                       ?assertEqual(0, GenerationID),
+                                       ?assertEqual(<<"member_id">>, MemberID),
+                                       ?assertEqual(<<"topic">>, Topic),
+                                       ?assertEqual(0, Partition),
+                                       ?assertEqual(103, Offset),
+                                       {error, test_error}
+                                   end),
+  State = #state{commits =
+                 [
+                  {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, true},
+                  {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                  {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                 ]},
+  ?assertMatch({reply, {error, test_error},
+                #state{commits =
+                       [
+                        {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                       ]}},
+               unordered_commit(<<"topic">>,
+                                0,
+                                100,
+                                <<"group_id">>,
+                                0,
+                                <<"member_id">>,
+                                #{},
+                                State)),
+  meck:unload(kafe).
+
+unordered_commit_delayed_test() ->
+  State = #state{commits =
+                 [
+                  {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                  {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                 ]},
+  ?assertMatch({reply, delayed,
+                #state{commits =
+                       [
+                        {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                       ]}},
+               unordered_commit(<<"topic">>,
+                                0,
+                                101,
+                                <<"group_id">>,
+                                0,
+                                <<"member_id">>,
+                                #{},
+                                State)).
+
+unordered_commit_invalid_commit_test() ->
+  State = #state{commits =
+                 [
+                  {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                  {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                 ]},
+  ?assertMatch({reply, {error, invalid_commit_ref},
+                #state{commits =
+                       [
+                        {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                       ]}},
+               unordered_commit(<<"topic_invalid">>,
+                                0,
+                                101,
+                                <<"group_id">>,
+                                0,
+                                <<"member_id">>,
+                                #{},
+                                State)),
+  ?assertMatch({reply, {error, invalid_commit_ref},
+                #state{commits =
+                       [
+                        {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                       ]}},
+               unordered_commit(<<"topic">>,
+                                1,
+                                101,
+                                <<"group_id">>,
+                                0,
+                                <<"member_id">>,
+                                #{},
+                                State)),
+  ?assertMatch({reply, {error, invalid_commit_ref},
+                #state{commits =
+                       [
+                        {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                       ]}},
+               unordered_commit(<<"topic">>,
+                                0,
+                                104,
+                                <<"group_id">>,
+                                0,
+                                <<"member_id">>,
+                                #{},
+                                State)),
+  ?assertMatch({reply, {error, invalid_commit_ref},
+                #state{commits =
+                       [
+                        {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                       ]}},
+               unordered_commit(<<"topic">>,
+                                0,
+                                101,
+                                <<"group_id_invalid">>,
+                                0,
+                                <<"member_id">>,
+                                #{},
+                                State)),
+  ?assertMatch({reply, {error, invalid_commit_ref},
+                #state{commits =
+                       [
+                        {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                       ]}},
+               unordered_commit(<<"topic_invalid">>,
+                                0,
+                                101,
+                                <<"group_id">>,
+                                1,
+                                <<"member_id">>,
+                                #{},
+                                State)),
+  ?assertMatch({reply, {error, invalid_commit_ref},
+                #state{commits =
+                       [
+                        {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, true},
+                        {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, true}
+                       ]}},
+               unordered_commit(<<"topic1">>,
+                                0,
+                                101,
+                                <<"group_id">>,
+                                0,
+                                <<"member_id_invalid">>,
+                                #{},
+                                State)).
+
+ordered_commit_test() ->
+  meck:new(kafe, [passthrough]),
+  meck:expect(kafe, offset_commit, fun(GroupID, GenerationID, MemberID, _,
+                                       [{Topic, [{Partition, Offset, <<>>}]}]) ->
+                                       ?assertEqual(<<"group_id">>, GroupID),
+                                       ?assertEqual(0, GenerationID),
+                                       ?assertEqual(<<"member_id">>, MemberID),
+                                       ?assertEqual(<<"topic">>, Topic),
+                                       ?assertEqual(0, Partition),
+                                       ?assertEqual(100, Offset),
+                                       {ok,
+                                        [#{name => Topic,
+                                           partitions =>
+                                           [#{error_code => none,
+                                              partition => Partition}]}]}
+                                   end),
+  State = #state{commits =
+                 [
+                  {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, false}
+                 ]},
+  ?assertMatch({reply, ok,
+                #state{commits =
+                       [
+                        {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, false},
+                        {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, false}
+                       ]}},
+               ordered_commit(<<"topic">>,
+                              0,
+                              100,
+                              <<"group_id">>,
+                              0,
+                              <<"member_id">>,
+                              #{},
+                              State)),
+  meck:unload(kafe).
+
+ordered_commit_kafka_commit_failed_test() ->
+  meck:new(kafe, [passthrough]),
+  meck:expect(kafe, offset_commit, fun(GroupID, GenerationID, MemberID, _,
+                                       [{Topic, [{Partition, Offset, <<>>}]}]) ->
+                                       ?assertEqual(<<"group_id">>, GroupID),
+                                       ?assertEqual(0, GenerationID),
+                                       ?assertEqual(<<"member_id">>, MemberID),
+                                       ?assertEqual(<<"topic">>, Topic),
+                                       ?assertEqual(0, Partition),
+                                       ?assertEqual(100, Offset),
+                                       {ok,
+                                        [#{name => Topic,
+                                           partitions =>
+                                           [#{error_code => test_error,
+                                              partition => Partition}]}]}
+                                   end),
+  State = #state{commits =
+                 [
+                  {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, false}
+                 ]},
+  ?assertMatch({reply, {error, test_error}, State},
+               ordered_commit(<<"topic">>,
+                              0,
+                              100,
+                              <<"group_id">>,
+                              0,
+                              <<"member_id">>,
+                              #{},
+                              State)),
+  meck:unload(kafe).
+
+
+ordered_commit_kafe_offset_commit_failed_test() ->
+  meck:new(kafe, [passthrough]),
+  meck:expect(kafe, offset_commit, fun(GroupID, GenerationID, MemberID, _,
+                                       [{Topic, [{Partition, Offset, <<>>}]}]) ->
+                                       ?assertEqual(<<"group_id">>, GroupID),
+                                       ?assertEqual(0, GenerationID),
+                                       ?assertEqual(<<"member_id">>, MemberID),
+                                       ?assertEqual(<<"topic">>, Topic),
+                                       ?assertEqual(0, Partition),
+                                       ?assertEqual(100, Offset),
+                                       {error, test_error}
+                                   end),
+  State = #state{commits =
+                 [
+                  {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, false}
+                 ]},
+  ?assertMatch({reply, {error, test_error}, State},
+               ordered_commit(<<"topic">>,
+                              0,
+                              100,
+                              <<"group_id">>,
+                              0,
+                              <<"member_id">>,
+                              #{},
+                              State)),
+  meck:unload(kafe).
+
+ordered_commit_missing_previous_commit_test() ->
+  State = #state{commits =
+                 [
+                  {{<<"topic">>, 0, 100, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 101, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 102, <<"group_id">>, 0, <<"member_id">>}, false},
+                  {{<<"topic">>, 0, 103, <<"group_id">>, 0, <<"member_id">>}, false}
+                 ]},
+  ?assertMatch({reply, {error, missing_previous_commit}, State},
+               ordered_commit(<<"topic">>,
+                              0,
+                              101,
+                              <<"group_id">>,
+                              0,
+                              <<"member_id">>,
+                              #{},
+                              State)).
 -endif.
 
