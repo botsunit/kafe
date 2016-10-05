@@ -16,7 +16,7 @@ init([Topic, Partition, FetchInterval,
       GroupID, Autocommit, MinBytes, MaxBytes,
       MaxWaitTime, Callback, Processing]) ->
   {ok, {
-    #{strategy => one_for_one,
+    #{strategy => one_for_all,
       intensity => 1,
       period => 5},
     [
