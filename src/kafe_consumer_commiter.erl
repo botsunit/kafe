@@ -164,15 +164,17 @@ find_last_commit([{_, true} = Commit|Rest], _) ->
 do_commit(_, _, _, _, _, _, Retry, _, Return) when Retry < 0 ->
   Return;
 do_commit(GroupID, GenerationID, MemberID, Topic, Partition, Offset, Retry, Delay, _) ->
-  lager:debug("Commit Offset ~p for Topic ~p, partition ~p", [Offset, Topic, Partition]),
+  lager:debug("Try (~p) to commit Offset ~p for Topic ~p, partition ~p", [Retry, Offset, Topic, Partition]),
   case kafe:offset_commit(GroupID, GenerationID, MemberID, -1,
                           [{Topic, [{Partition, Offset, <<>>}]}]) of
     {ok, [#{name := Topic,
             partitions := [#{error_code := none,
                              partition := Partition}]}]} = R ->
+      lager:debug("Commit Offset ~p for Topic ~p, partition ~p", [Offset, Topic, Partition]),
       R;
     Other ->
       _ = timer:sleep(Delay),
+      lager:debug("Try (~p) to commit Offset ~p for Topic ~p, partition ~p failed: ~p", [Retry, Offset, Topic, Partition, Other]),
       do_commit(GroupID, GenerationID, MemberID, Topic, Partition, Offset, Retry - 1, Delay, Other)
   end.
 
