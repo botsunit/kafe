@@ -46,6 +46,9 @@ NODE_HOST ?= 127.0.0.1
 ifneq ("$(wildcard config/$(current_dir).config)","")
   ERL_CONFIG="config/$(current_dir).config"
 endif
+ifneq ("$(wildcard config/$(current_dir)-$(REBAR_ENV).config)","")
+  ERL_CONFIG="config/$(current_dir)-$(REBAR_ENV).config"
+endif
 
 # Core functions.
 
