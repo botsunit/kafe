@@ -28,7 +28,7 @@ defmodule Kafe.Mixfile do
       {:doteki, "~> 0.1.13"},
       {:poolgirl, git: "https://github.com/botsunit/poolgirl.git", branch: "master"},
       {:bristow, "~> 0.1.1"},
-      {:metrics, "~> 2.1.0"}    
+      {:metrics, git: "https://github.com/botsunit/erlang-metrics.git", branch: "add_delete"}    
     ]
   end
 
