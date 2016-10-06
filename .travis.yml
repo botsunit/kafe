@@ -5,4 +5,5 @@ otp_release:
   - 18.0
   - 17.0
   - 17.1
+install: true
 script: 'make dist'
