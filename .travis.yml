@@ -13,4 +13,7 @@ otp_release:
   - 17.0
   - 17.1
 install: true
-script: 'make dist'
+script:
+  - mix local.rebar --force
+  - mix local.hex --force
+  - make dist
