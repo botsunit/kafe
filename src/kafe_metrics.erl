@@ -10,9 +10,23 @@
          , delete_consumer_partition/3
          , consumer_partition_messages/4
          , consumer_partition_duration/4
+
+         , ensure_metrics_mod_started/0
         ]).
 
+ensure_metrics_mod_started() ->
+  ensure_metrics_mod_started(metrics:backend()).
+ensure_metrics_mod_started(metrics_folsom) ->
+  application:ensure_all_started(folsom);
+ensure_metrics_mod_started(metrics_exometer) ->
+  application:ensure_all_started(exometer);
+ensure_metrics_mod_started(metrics_grapherl) ->
+  application:ensure_all_started(grapherl);
+ensure_metrics_mod_started(_) ->
+  ok.
+
 init_consumer(Consumer) ->
+  ensure_metrics_mod_started(),
   metrics:new(gauge, consumer_metric(Consumer, <<"messages.fetch">>)),
   metrics:new(counter, consumer_metric(Consumer, <<"messages">>)).
 
@@ -35,6 +49,7 @@ consumer_metric(Consumer, Ext) ->
                    ".", Ext/binary>>).
 
 init_consumer_partition(Consumer, Topic, Partition) ->
+  ensure_metrics_mod_started(),
   metrics:new(gauge, consumer_partition_metric(Consumer, Topic, Partition, <<"messages.fetch">>)),
   metrics:new(gauge, consumer_partition_metric(Consumer, Topic, Partition, <<"duration.fetch">>)),
   metrics:new(counter, consumer_partition_metric(Consumer, Topic, Partition, <<"messages">>)).
