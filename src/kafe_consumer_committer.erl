@@ -58,7 +58,7 @@ handle_call(remove_commits, _From, State) ->
 handle_call({offset, Offset}, _From, #state{group_id = GroupID,
                                             topic = Topic,
                                             partition = Partition} = State) ->
-  case (Offset - 1) of
+  case Offset of
     CommitOffset when CommitOffset >= 0 ->
       GenerationID = kafe_consumer_store:value(GroupID, generation_id),
       MemberID = kafe_consumer_store:value(GroupID, member_id),
