@@ -990,14 +990,12 @@ update_state_with_metadata(State) ->
     undefined ->
       State2;
     _ ->
-      case gen_server:call(FirstBroker,
-                           {call,
-                            fun kafe_protocol_metadata:request/2, [[]],
-                            fun kafe_protocol_metadata:response/2},
-                           ?TIMEOUT) of
+      case kafe_protocol:run(FirstBroker,
+                             {call,
+                              fun kafe_protocol_metadata:request/2, [[]],
+                              fun kafe_protocol_metadata:response/2}) of
         {ok, #{brokers := Brokers,
                topics := Topics}} ->
-          release_broker(FirstBroker),
           {Brokers1, State3} = lists:foldl(fun(#{host := Host, id := ID, port := Port}, {Acc, StateAcc}) ->
                                                {maps:put(ID, kafe_utils:broker_name(Host, Port), Acc),
                                                 get_connection([{bucs:to_string(Host), Port}], StateAcc)}
@@ -1011,7 +1009,6 @@ update_state_with_metadata(State) ->
               maps:put(topics, Topics1, State4)
           end;
         _ ->
-          release_broker(FirstBroker),
           State2
       end
   end.
@@ -1074,7 +1071,7 @@ remove_dead_brokers(#{brokers_list := BrokersList} = State) ->
                     BrokerID ->
                       case poolgirl:checkout(BrokerID) of
                         {ok, BrokerPID} ->
-                          case gen_server:call(BrokerPID, alive, ?TIMEOUT) of
+                          case check_if_broker_is_alive(BrokerPID) of
                             ok ->
                               _ = poolgirl:checkin(BrokerPID),
                               State1;
@@ -1115,7 +1112,7 @@ get_first_broker([]) -> undefined;
 get_first_broker([BrokerID|Rest]) ->
   case poolgirl:checkout(BrokerID) of
     {ok, Broker} ->
-      case gen_server:call(Broker, alive, ?TIMEOUT) of
+      case check_if_broker_is_alive(Broker) of
         ok ->
           Broker;
         {error, Reason} ->
@@ -1128,3 +1125,10 @@ get_first_broker([BrokerID|Rest]) ->
       get_first_broker(Rest)
   end.
 
+check_if_broker_is_alive(BrokerPid) ->
+  try
+    gen_server:call(BrokerPid, alive, ?TIMEOUT)
+  catch
+    Type:Error ->
+      {error, {Type, Error}}
+  end.
