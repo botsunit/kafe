@@ -1,4 +1,4 @@
--define(DEFAULT_IP, bucinet:loopback()).
+-define(DEFAULT_IP, "127.0.0.1").
 -define(DEFAULT_PORT, 9092).
 -define(DEFAULT_CLIENT_ID, <<"kafe">>).
 -define(DEFAULT_CORRELATION_ID, 0).

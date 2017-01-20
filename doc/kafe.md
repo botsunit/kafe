@@ -13,8 +13,6 @@ Copyright (c) 2014-2015 Finexkap, 2015 G-Corp, 2015-2016 BotsUnit
 
 __Introduced in:__ 2014
 
-__Behaviours:__ [`gen_server`](gen_server.md).
-
 __Authors:__ Grégoire Lejeune ([`gl@finexkap.com`](mailto:gl@finexkap.com)), Grégoire Lejeune ([`greg@g-corp.io`](mailto:greg@g-corp.io)), Grégoire Lejeune ([`gregoire.lejeune@botsunit.com`](mailto:gregoire.lejeune@botsunit.com)).
 
 <a name="description"></a>

@@ -30,7 +30,7 @@ init({Addr, Port}) ->
                                     {buffer, Buffer}]) of
     {ok, Socket} ->
       {ok, {LocalAddr, LocalPort}} = inet:sockname(Socket),
-      lager:info("Connected to broker ~s:~p from ~s:~p", [bucinet:ip_to_string(Addr), Port, bucinet:ip_to_string(LocalAddr), LocalPort]),
+      lager:debug("Connected to broker ~s:~p from ~s:~p", [bucinet:ip_to_string(Addr), Port, bucinet:ip_to_string(LocalAddr), LocalPort]),
       ApiVersion = doteki:get_env([kafe, api_version], ?DEFAULT_API_VERSION),
       CorrelationID = doteki:get_env([kafe, correlation_id], ?DEFAULT_CORRELATION_ID),
       ClientID = doteki:get_env([kafe, client_id], ?DEFAULT_CLIENT_ID),
@@ -82,7 +82,7 @@ handle_info({tcp, _Socket, Packet}, State) ->
       {stop, Reason, State}
   end;
 handle_info({tcp_closed, _Socket}, #{ip := Addr, port := Port} = State) ->
-  lager:info("Connection to broker ~s:~p closed", [bucinet:ip_to_string(Addr), Port]),
+  lager:debug("Connection to broker ~s:~p closed", [bucinet:ip_to_string(Addr), Port]),
   {stop, normal, State};
 handle_info(Info, State) ->
   lager:warning("Invalid message : ~p", [Info]),
