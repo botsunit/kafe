@@ -275,6 +275,12 @@ init([GroupID, Options]) ->
        intensity => 1,
        period => 5},
      [
+      #{id => kafe_consumer_fetcher_sup,
+        start => {kafe_consumer_fetcher_sup, start_link, []},
+        restart => permanent,
+        type => supervisor,
+        shutdown => infinity,
+        modules => [kafe_consumer_fetcher_sup]},
       #{id => kafe_consumer_srv,
         start => {kafe_consumer_srv, start_link, [GroupID, Options]},
         restart => permanent,

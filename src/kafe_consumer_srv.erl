@@ -91,13 +91,29 @@ init([GroupID, Options]) ->
          }}.
 
 % @hidden
-handle_call({topics, Topics}, _From, #state{topics = CurrentTopics, group_id = GroupID} = State) ->
+handle_call({topics, Topics}, _From, #state{topics = CurrentTopics,
+                                            group_id = GroupID,
+                                            on_assignment_change = OnAssignmentChange,
+                                            from_beginning = FromBeginning,
+                                            min_bytes = MinBytes,
+                                            max_bytes = MaxBytes,
+                                            max_wait_time = MaxWaitTime,
+                                            fetch_interval = FetchInterval} = State) ->
   if
     Topics == CurrentTopics ->
       {reply, ok, State};
     true ->
       kafe_consumer_store:insert(GroupID, topics, Topics),
+
+% TODO ====>>
+      kafe_consumer_fetcher_sup:update_fetchers(
+        Topics,
+        GroupID,
+        OnAssignmentChange,
+        [FromBeginning, MinBytes, MaxBytes, MaxWaitTime, FetchInterval]),
+
       {reply, ok, update_fetchers(Topics, State#state{topics = Topics})}
+% TODO <<====
   end;
 handle_call(start_fetch, _From, #state{group_id = GroupID, on_start_fetching = OnStartFetching} = State) ->
   case kafe_consumer_store:lookup(GroupID, can_fetch) of
