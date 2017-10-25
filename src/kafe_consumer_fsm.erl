@@ -119,6 +119,7 @@ dead(timeout, #state{group_id = GroupID,
       next_state(dead, State);
     {error, Reason} ->
       lager:warning("Join group failed: ~p", [Reason]),
+      timer:sleep(2000),
       next_state(State)
   end.
 
