@@ -153,6 +153,7 @@ handle_cast(_Msg, State) ->
 % @hidden
 handle_info({'DOWN', MonitorRef, Type, Object, Info}, State) ->
   lager:debug("DOWN ~p, ~p, ~p, ~p", [MonitorRef, Type, Object, Info]),
+  exit(self(), :kill)
   {noreply, State};
 handle_info(_Info, State) ->
   {noreply, State}.
