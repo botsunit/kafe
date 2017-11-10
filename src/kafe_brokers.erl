@@ -37,6 +37,7 @@
 
 -define(SERVER, ?MODULE).
 -define(ETS_TABLE, kafe_brokers).
+-define(STACKS_ETS_TABLE, kafe_brokers_stacks).
 -record(state, {
           default_brokers = [],
           brokers_update_frequency = ?DEFAULT_BROKER_UPDATE,
@@ -144,7 +145,9 @@ broker_by_id(BrokerID) ->
 -spec release_broker(BrokerPID :: pid()) -> ok.
 release_broker(BrokerPID) ->
   case poolgirl:checkin(BrokerPID) of
-    ok -> ok;
+    ok ->
+      ets:delete(?STACKS_ETS_TABLE, BrokerPID),
+      ok;
     {error, Error} ->
       lager:error("Checkin broker ~p failed: ~p", [BrokerPID, Error]),
       ok
@@ -223,6 +226,7 @@ api_version(_, Version) ->
 % @hidden
 init(_) ->
   ets:new(?ETS_TABLE, [public, named_table]),
+  ets:new(?STACKS_ETS_TABLE, [public, named_table]),
   ets:insert(?ETS_TABLE, [{api_version, doteki:get_env([kafe, api_version], ?DEFAULT_API_VERSION)}]),
   Timeout = doteki:get_env(
               [kafe, brokers_update_frequency],
@@ -270,6 +274,7 @@ handle_info(_Info, StateName, State) ->
 % @hidden
 terminate(_Reason, _StateName, _State) ->
   ets:delete(?ETS_TABLE),
+  ets:delete(?STACKS_ETS_TABLE),
   ok.
 
 % @hidden
@@ -486,6 +491,8 @@ checkout_broker(BrokerID) ->
     {ok, Broker} ->
       case is_broker_alive(Broker) of
         true ->
+          {_, Stack} = process_info(self(), current_stacktrace),
+          ets:insert(?STACKS_ETS_TABLE, {Broker, Stack}),
           Broker;
         false ->
           _ = poolgirl:checkin(Broker),
