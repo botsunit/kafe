@@ -5,7 +5,10 @@
 kafe_protocol_produce_test_() ->
   {setup, fun setup/0, fun teardown/1,
    [
-    ?_test(t_request()),
+    ?_test(t_request_v0()),
+    ?_test(t_request_v1()),
+    ?_test(t_request_v2_explicit_timestamp()),
+    ?_test(t_request_v2_automatic_timestamp()),
     ?_test(t_response())
    ]
   }.
@@ -16,7 +19,7 @@ setup() ->
 teardown(_) ->
   ok.
 
-t_request() ->
+t_request_v0() ->
   ?assertEqual(
      #{packet => <<0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 116, 101, 115, 116, 255, 255, 0, 0, 19, 136, 0, 0, 0, 1, 0, 5, 116, 111,
                    112, 105, 99, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 37, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 86, 91, 193, 236,
@@ -30,8 +33,9 @@ t_request() ->
                                    #{api_key => ?PRODUCE_REQUEST,
                                      api_version => 0,
                                      correlation_id => 0,
-                                     client_id => <<"test">>})),
+                                     client_id => <<"test">>})).
 
+t_request_v1() ->
   ?assertEqual(
      #{packet => <<0, 0, 0, 1, 0, 0, 0, 0, 0, 4, 116, 101, 115, 116, 255, 255, 0, 0, 19, 136, 0, 0, 0, 1, 0, 5, 116, 111,
                    112, 105, 99, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 37, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 86, 91, 193, 236,
@@ -56,7 +60,7 @@ t_request() ->
                   client_id => <<"test">>,
                   correlation_id => 1}},
      kafe_protocol_produce:request([{<<"topic">>, [{0, [{<<>>, <<"hello world">>}]}]}],
-                                   #{timestamp => 1460103641930371},
+                                   #{timestamp => not_used},
                                    #{api_key => ?PRODUCE_REQUEST,
                                      api_version => 1,
                                      correlation_id => 0,
@@ -76,11 +80,74 @@ t_request() ->
      kafe_protocol_produce:request([{<<"topic">>, [{0, [{<<>>, <<"hello world">>},
                                                         {<<>>, <<"hola mundo">>},
                                                         {<<>>, <<"bonjour le monde">>}]}]}],
-                                   #{timestamp => 1460103641930371},
+                                   #{timestamp => not_used},
                                    #{api_key => ?PRODUCE_REQUEST,
                                      api_version => 1,
                                      correlation_id => 0,
                                      client_id => <<"test">>})).
+
+t_request_v2_explicit_timestamp() ->
+  ?assertEqual(
+     #{packet => << ?PRODUCE_REQUEST:16 % API key
+                  , 2:16                % API version
+                  , 0:32                % correlation id
+                  , 4:16, "test"        % client id
+                    , -1:16               % required acks
+                    , 5000:32             % timeout
+                    , 1:32                % message count
+                      , 5:16, "topic"       % topic name
+                      , 1:32                % partition count
+                        , 0:32                    % partition index
+                        , (8+4+4+1+1+8+4+4+11):32 % message set size
+                          % offset
+                          , 0:64
+                          % message size
+                          , (4+1+1+8+4+4+11):32
+                          % crc,                magic, attributes, timestamp,        key,   value
+                          , 240, 221, 239, 209, 1,     0,          1000000000000:64, 0:32,  11:32, "hello world"
+                 >>,
+       state => #{api_key => ?PRODUCE_REQUEST,
+                  api_version => 2,
+                  client_id => <<"test">>,
+                  correlation_id => 1}},
+     kafe_protocol_produce:request([{<<"topic">>, [{0, [{<<>>, <<"hello world">>}]}]}],
+                                   #{timestamp => 1000000000000},
+                                   #{api_key => ?PRODUCE_REQUEST,
+                                     api_version => 2,
+                                     correlation_id => 0,
+                                     client_id => <<"test">>})).
+
+t_request_v2_automatic_timestamp() ->
+  Now = erlang:system_time(millisecond),
+
+  #{ packet :=
+     << ?PRODUCE_REQUEST:16 % API key
+     , 2:16                % API version
+     , 0:32                % correlation id
+     , 4:16, "test"        % client id
+       , -1:16/signed        % required acks
+       , _Timeout:32         % timeout
+       , 1:32                % message count
+         , 5:16, "topic"       % topic name
+         , 1:32                % partition count
+           , 0:32                    % partition index
+           , MessageSet/binary >> } =
+     kafe_protocol_produce:request([{<<"topic">>, [{0, [{<<>>, <<"hello world">>}]}]}],
+                                   #{},
+                                   #{api_key => ?PRODUCE_REQUEST,
+                                     api_version => 2,
+                                     correlation_id => 0,
+                                     client_id => <<"test">>}),
+
+  << _MsgSetSize:32 % message set size
+       , 0:64                      % offset
+       , _MsgSize:32       % message size
+       % crc,     magic, attributes, timestamp,        key+value
+       , _Crc:32, 1,     0,          Timestamp:64,     _KeyAndValue/binary >> =
+    MessageSet,
+
+  ?assertMatch(T when T >= Now, Timestamp),
+  ?assertMatch(T when T < Now + 10000, Timestamp).
 
 t_response() ->
   ?assertEqual({ok, [#{name => <<"topic">>,

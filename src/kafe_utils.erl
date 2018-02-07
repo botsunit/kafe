@@ -21,8 +21,7 @@ broker_name(Host, Port) ->
   string:join([bucs:to_string(Host1), bucs:to_string(Port)], ":").
 
 timestamp() ->
-  {Mega, Sec, Micro} = erlang:timestamp(),
-  (Mega * 1000000 + Sec) * 1000000 + Micro.
+  erlang:system_time(millisecond).
 
 % Because meck can't mock gen_server:call/2
 gen_server_call(ServerRef, Request) ->
