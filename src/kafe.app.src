@@ -1,6 +1,6 @@
 {application, kafe, [
     {description, "A Kafka client for Erlang and Elixir"}
-  , {vsn, "2.2.3"}
+  , {vsn, "2.2.4"}
   , {registered, []}
   , {modules, []}
   , {applications, [
