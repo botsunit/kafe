@@ -293,11 +293,15 @@ get_connections([{Host, Port}|Rest], PoolSize, ChunkPoolSize) ->
       {ok, #hostent{h_name = Hostname,
                     h_addrtype = AddrType,
                     h_addr_list = AddrsList}} ->
-        case get_host(AddrsList, Hostname, AddrType) of
+        lager:debug("[get_connections] Got resolved ~p to ~p", [Host, Hostname]),
+        lager:debug("[get_connections] AddrsList ~p", [AddrsList]),
+        case get_host(AddrsList, Host, AddrType) of
           undefined ->
             lager:warning("Can't retrieve host for ~s:~p", [Host, Port]),
             get_connections(Rest, PoolSize, ChunkPoolSize);
           {BrokerAddr, BrokerHostList} ->
+            lager:debug("[get_connections] will now connect to ~p for Hostname: ~p", [BrokerAddr, Host]),
+            lager:debug("[get_connections] after get_host BrokerHostList is ~p",  [BrokerHostList]),
             case lists:foldl(fun(E, Acc) ->
                                  BrokerFullName = kafe_utils:broker_name(E, Port),
                                  case lists:member(BrokerFullName, BrokersList) of
@@ -355,12 +359,14 @@ get_host([], _, _) -> undefined;
 get_host([Addr|Rest], Hostname, AddrType) ->
   case inet:getaddr(Hostname, AddrType) of
     {ok, Addr} ->
-      case inet:gethostbyaddr(Addr) of
-        {ok, #hostent{h_name = Hostname1, h_aliases = HostAlias}} ->
-          {Addr, lists:usort([Hostname|[Hostname1|HostAlias]])};
-        _ ->
-          {Addr, [Hostname]}
-      end;
+     % case inet:gethostbyaddr(Addr) of
+     %   {ok, #hostent{h_name = _Hostname1, h_aliases = _HostAlias}} ->
+     %     %{Addr, lists:usort([Hostname|[Hostname1|HostAlias]])};
+     %     {Addr, [Hostname]};
+     %   _ ->
+     %     {Addr, [Hostname]}
+     % end;
+      {Addr, [Hostname]};
     _ -> get_host(Rest, Hostname, AddrType)
   end.
 
@@ -405,12 +411,14 @@ update_state_with_metadata(PoolSize, ChunkPoolSize) ->
   case kafe:metadata() of
     {ok, #{brokers := Brokers,
            topics := Topics}} ->
+      lager:info("[update_state_with_metadata] Brokers ~p", [Brokers]),
       BrokersByID = maps:from_list(
                    [ begin
                        get_connections([{bucs:to_string(Host), Port}], PoolSize, ChunkPoolSize),
                        {ID, kafe_utils:broker_name(Host, Port)}
                      end ||
                      #{id := ID, host := Host, port := Port} <- Brokers ]),
+      lager:info("BrokersByID ~p", [BrokersByID]),
       remove_unlisted_brokers(maps:values(BrokersByID)),
       TopicsWithLeaders = leaders_for_topics(Topics, BrokersByID),
       ets:insert(?ETS_TABLE, [{topics, TopicsWithLeaders}]);
@@ -420,7 +428,10 @@ update_state_with_metadata(PoolSize, ChunkPoolSize) ->
 
 remove_unlisted_brokers(NewBrokersList) ->
   Brokers = ets_get(?ETS_TABLE, brokers, #{}),
+  lager:debug("Brokers = ~p", [Brokers]),
+  lager:debug("NewBrokersList = ~p", [NewBrokersList]),
   NewBrokers = lists:foldr(fun(BrokerName, Acc) ->
+                              lager:debug("Getting broker by name ~p", [BrokerName]),
                                case maps:get(BrokerName, Brokers, undefined) of
                                  undefined -> Acc;
                                  Broker -> maps:put(BrokerName, Broker, Acc)
