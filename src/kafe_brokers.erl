@@ -411,14 +411,14 @@ update_state_with_metadata(PoolSize, ChunkPoolSize) ->
   case kafe:metadata() of
     {ok, #{brokers := Brokers,
            topics := Topics}} ->
-      lager:info("[update_state_with_metadata] Brokers ~p", [Brokers]),
+      lager:debug("[update_state_with_metadata] Brokers ~p", [Brokers]),
       BrokersByID = maps:from_list(
                    [ begin
                        get_connections([{bucs:to_string(Host), Port}], PoolSize, ChunkPoolSize),
                        {ID, kafe_utils:broker_name(Host, Port)}
                      end ||
                      #{id := ID, host := Host, port := Port} <- Brokers ]),
-      lager:info("BrokersByID ~p", [BrokersByID]),
+      lager:debug("BrokersByID ~p", [BrokersByID]),
       remove_unlisted_brokers(maps:values(BrokersByID)),
       TopicsWithLeaders = leaders_for_topics(Topics, BrokersByID),
       ets:insert(?ETS_TABLE, [{topics, TopicsWithLeaders}]);
